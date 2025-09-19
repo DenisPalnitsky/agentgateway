@@ -1,21 +1,11 @@
 name: Release
 
 on:
-  push:
-    tags:
-    - "v*.*.*"
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version number'
-      skip_gh_release:
-        description: 'Skip creating a GitHub release'
-        required: false
-        default: false
-        type: boolean
+  push:    
+  workflow_dispatch:    
 
 env:
-  REGISTRY_IMAGE: ghcr.io/agentgateway/agentgateway
+  REGISTRY_IMAGE: ghcr.io/denispalnitsky/agentgateway
 
 jobs:
   build-image:
@@ -245,100 +235,3 @@ jobs:
       - name: Inspect image
         run: |
           docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }}-musl
-
-  build:
-    if: ${{ github.event_name == 'push' || ! github.event.inputs.skip_gh_release }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-musl
-            # Performance is horrendous on musl without jemalloc
-            features: jemalloc
-          - os: ubuntu-22.04-arm
-            target: aarch64-unknown-linux-musl
-            # TODO: arm64 build fails with jemalloc for some reason?
-            features: default
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            features: default
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            features: default
-    steps:
-    - name: Prepare
-      run: |
-        echo "VERSION=${GITHUB_REF##*/v}" >> $GITHUB_ENV
-    - name: Checkout Repository
-      uses: actions/checkout@v4
-    - uses: actions/setup-node@v4
-      with:
-        node-version: 23
-    - name: Install Rust
-      uses: dtolnay/rust-toolchain@stable
-      with:
-        targets: ${{ matrix.target }}
-    # TODO: build this in a separate job and just copy it over
-    - name: Build UI
-      run: |
-        cd ui
-        npm install
-        npm run build
-    - name: Install musl-tools
-      if: ${{ matrix.os == 'ubuntu-22.04-arm' || matrix.os == 'ubuntu-latest' }}
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y musl-tools
-        rustup target add ${{ matrix.target }}
-    - name: Build
-      run: make build
-      env:
-        CARGO_BUILD_ARGS: "--target ${{ matrix.target }} -F ${{ matrix.features }}"
-    - name: Debug dirty build
-      run: |
-        git status
-    - name: Upload Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: release-binary-${{ matrix.os }}
-        path: |
-          target/${{ matrix.target }}/release/agentgateway
-          target/${{ matrix.target }}/release/agentgateway.exe
-
-  release:
-    if: ${{ github.event_name == 'push' || ! github.event.inputs.skip_gh_release }}
-    needs:
-    - push-image
-    - musl-push-image
-    - build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-    - name: Download Artifacts
-      uses: actions/download-artifact@v4
-      with:
-        pattern: release-binary-*
-
-    - name: Display structure of downloaded files
-      run: |
-        ls -R
-        mkdir outputs
-        mv release-binary-macos-latest/agentgateway outputs/agentgateway-darwin-arm64
-        sha256sum outputs/agentgateway-darwin-arm64 > outputs/agentgateway-darwin-arm64.sha256
-        mv release-binary-ubuntu-latest/agentgateway outputs/agentgateway-linux-amd64
-        sha256sum outputs/agentgateway-linux-amd64 > outputs/agentgateway-linux-amd64.sha256
-        mv release-binary-ubuntu-22.04-arm/agentgateway outputs/agentgateway-linux-arm64
-        sha256sum outputs/agentgateway-linux-arm64 > outputs/agentgateway-linux-arm64.sha256
-        mv release-binary-windows-latest/agentgateway.exe outputs/agentgateway-windows-amd64.exe
-        sha256sum outputs/agentgateway-windows-amd64.exe > outputs/agentgateway-windows-amd64.exe.sha256
-    - name: Create GitHub Release
-      uses: softprops/action-gh-release@v2
-      with:
-        files: outputs/agentgateway-*
-        tag_name: ${{ github.ref_name }}
-        body: "Automated release of ${{ github.ref_name }}."
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      if: startsWith(github.ref, 'refs/tags/')
