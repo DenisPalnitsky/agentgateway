@@ -34,6 +34,9 @@ jobs:
       uses: docker/metadata-action@v5
       with:
         images: ${{ env.REGISTRY_IMAGE }}
+        tags: |
+          # git hash + platform tag
+          type=raw,value=${{ env.GIT_HASH }}-${{ env.PLATFORM_PAIR }}
 
     - name: Login to GitHub Container Registry
       uses: docker/login-action@v3
@@ -51,7 +54,7 @@ jobs:
       with:
         platforms: ${{ matrix.platform }}
         labels: ${{ steps.meta.outputs.labels }}
-        tags: ${{ env.REGISTRY_IMAGE }}
+        tags: ${{ steps.meta.outputs.tags }}
         outputs: type=image,push-by-digest=true,name-canonical=true,push=true
         cache-from: type=registry,ref=${{ env.REGISTRY_IMAGE }}:buildcache
         cache-to: type=registry,ref=${{ env.REGISTRY_IMAGE }}:buildcache,mode=max
@@ -109,9 +112,11 @@ jobs:
         with:
           images: ${{ env.REGISTRY_IMAGE }}
           tags: |
-           
-            # git hash tag
+            # git hash tag (multi-platform manifest)
             type=raw,value=${{ env.GIT_HASH }}
+            # git hash with platform-specific tags
+            type=raw,value=${{ env.GIT_HASH }}-linux-amd64
+            type=raw,value=${{ env.GIT_HASH }}-linux-arm64
 
       - name: Create manifest list and push
         working-directory: ${{ runner.temp }}/digests
